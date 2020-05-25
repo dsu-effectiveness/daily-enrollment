@@ -1,11 +1,11 @@
 SELECT f.stvterm_code,
        f.full_date,
        f.days_before_start,
-       COUNT(DISTINCT f.sfrstca_pidm) AS headcount
+       COUNT(DISTINCT f.sfrstca_pidm)
 FROM (
          SELECT a.stvterm_code,
                 c.full_date,
-                (a.stvterm_start_date - c.full_date) AS days_before_start,
+                (c.full_date - a.stvterm_start_date) AS days_before_start,
                 d.sfrstca_pidm,
                 d.sfrstca_crn,
                 d.sfrstca_rsts_code,
@@ -27,9 +27,9 @@ FROM (
              ON f.sfrstcr_term_code = d.sfrstca_term_code
             AND f.sfrstcr_pidm = d.sfrstca_pidm
             AND f.sfrstcr_crn = d.sfrstca_crn
-          WHERE d.sfrstca_term_code = '201940'
+          WHERE d.sfrstca_term_code IN ('201840','201940','202040')
+            AND c.full_date <= SYSDATE
     ) f
 WHERE f.rn = 1
   AND f.sfrstca_rsts_code IN (SELECT stvrsts_code FROM stvrsts WHERE stvrsts_incl_sect_enrl = 'Y')
-
 GROUP BY stvterm_code, full_date, days_before_start

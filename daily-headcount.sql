@@ -1,33 +1,35 @@
-SELECT COUNT(DISTINCT x.sfrstca_pidm)
-  FROM (
-       SELECT a.sfrstca_pidm,
-              a.sfrstca_term_code,
-              a.sfrstca_crn,
-              b.stvrsts_desc,
-              b.stvrsts_incl_sect_enrl
-         FROM sfrstca a
-    LEFT JOIN stvrsts b
-           ON a.sfrstca_rsts_code = b.stvrsts_code
-    LEFT JOIN ssbsect c
-           ON a.sfrstca_term_code = c.ssbsect_term_code
-          AND a.sfrstca_crn = c.ssbsect_crn
-   INNER JOIN sfrstcr d
-           ON a.sfrstca_term_code = d.sfrstcr_term_code
-          AND a.sfrstca_pidm = d.sfrstcr_pidm
-          AND a.sfrstca_crn = d.sfrstcr_crn
-        WHERE a.sfrstca_term_code = '201740'
-          AND a.sfrstca_source_cde = 'BASE'
-          AND c.ssbsect_ssts_code = 'A'
-          AND NVL(c.ssbsect_credit_hrs, 1) <> 0
-          AND a.sfrstca_rsts_date = (SELECT MAX(aa.sfrstca_rsts_date)
-                                           FROM sfrstca aa
-                                          WHERE a.sfrstca_pidm = aa.sfrstca_pidm
-                                            AND a.sfrstca_crn = aa.sfrstca_crn
-                                            AND aa.sfrstca_rsts_date <= '11-SEP-2017')
-          AND a.sfrstca_seq_number = (SELECT MAX(aaa.sfrstca_seq_number)
-                                        FROM sfrstca aaa
-                                       WHERE a.sfrstca_pidm = aaa.sfrstca_pidm
-                                         AND a.sfrstca_crn = aaa.sfrstca_crn
-                                         AND aaa.sfrstca_rsts_date = a.sfrstca_rsts_date)
-                                        ) x
-    WHERE (x.stvrsts_incl_sect_enrl = 'Y')
+SELECT f.stvterm_code,
+       f.full_date,
+       f.days_before_start,
+       COUNT(DISTINCT f.sfrstca_pidm) AS headcount
+FROM (
+         SELECT a.stvterm_code,
+                c.full_date,
+                (a.stvterm_start_date - c.full_date) AS days_before_start,
+                d.sfrstca_pidm,
+                d.sfrstca_crn,
+                d.sfrstca_rsts_code,
+                ROW_NUMBER() OVER (PARTITION BY a.stvterm_code, c.full_date, d.sfrstca_pidm, d.sfrstca_crn
+                                       ORDER BY d.sfrstca_seq_number DESC) AS rn
+           FROM stvterm a
+     INNER JOIN sfrrsts b -- Opening date for web registration (SFRSTS_START_DATE).
+             ON a.stvterm_code = b.sfrrsts_term_code
+            AND b.sfrrsts_rsts_code = 'RW'
+            AND b.sfrrsts_ptrm_code = '1'
+      LEFT JOIN d_date@DSCIR c
+             ON c.full_date >= b.sfrrsts_start_date
+            AND c.full_date <= a.stvterm_end_date
+      LEFT JOIN sfrstca d
+             ON d.sfrstca_term_code = a.stvterm_code
+            AND d.sfrstca_rsts_date <= c.full_date
+            AND d.sfrstca_source_cde = 'BASE'
+     INNER JOIN sfrstcr f
+             ON f.sfrstcr_term_code = d.sfrstca_term_code
+            AND f.sfrstcr_pidm = d.sfrstca_pidm
+            AND f.sfrstcr_crn = d.sfrstca_crn
+          WHERE d.sfrstca_term_code = '201940'
+    ) f
+WHERE f.rn = 1
+  AND f.sfrstca_rsts_code IN (SELECT stvrsts_code FROM stvrsts WHERE stvrsts_incl_sect_enrl = 'Y')
+
+GROUP BY stvterm_code, full_date, days_before_start

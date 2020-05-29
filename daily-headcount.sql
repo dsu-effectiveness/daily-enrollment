@@ -1,35 +1,42 @@
-SELECT f.stvterm_code,
-       f.full_date,
-       f.days_before_start,
-       COUNT(DISTINCT f.sfrstca_pidm)
-FROM (
-         SELECT a.stvterm_code,
-                c.full_date,
-                (c.full_date - a.stvterm_start_date) AS days_before_start,
-                d.sfrstca_pidm,
-                d.sfrstca_crn,
-                d.sfrstca_rsts_code,
-                ROW_NUMBER() OVER (PARTITION BY a.stvterm_code, c.full_date, d.sfrstca_pidm, d.sfrstca_crn
-                                       ORDER BY d.sfrstca_seq_number DESC) AS rn
-           FROM stvterm a
-     INNER JOIN sfrrsts b -- Opening date for web registration (SFRSTS_START_DATE).
-             ON a.stvterm_code = b.sfrrsts_term_code
-            AND b.sfrrsts_rsts_code = 'RW'
-            AND b.sfrrsts_ptrm_code = '1'
-      LEFT JOIN d_date@DSCIR c
-             ON c.full_date >= b.sfrrsts_start_date
-            AND c.full_date <= a.stvterm_end_date
-      LEFT JOIN sfrstca d
-             ON d.sfrstca_term_code = a.stvterm_code
-            AND d.sfrstca_rsts_date <= c.full_date
-            AND d.sfrstca_source_cde = 'BASE'
-     INNER JOIN sfrstcr f
-             ON f.sfrstcr_term_code = d.sfrstca_term_code
-            AND f.sfrstcr_pidm = d.sfrstca_pidm
-            AND f.sfrstcr_crn = d.sfrstca_crn
-          WHERE d.sfrstca_term_code IN ('201840','201940','202040')
-            AND c.full_date <= SYSDATE
-    ) f
-WHERE f.rn = 1
-  AND f.sfrstca_rsts_code IN (SELECT stvrsts_code FROM stvrsts WHERE stvrsts_incl_sect_enrl = 'Y')
-GROUP BY stvterm_code, full_date, days_before_start
+WITH sfrstca_audit AS (
+            SELECT aa.sfrstca_term_code,
+               aa.sfrstca_pidm,
+               aa.sfrstca_crn,
+               aa.sfrstca_seq_number,
+               bb.stvrsts_incl_sect_enrl,
+               TRUNC(aa.sfrstca_rsts_date) AS sfrstca_rsts_date,
+               ROW_NUMBER() OVER (PARTITION BY aa.sfrstca_term_code, aa.sfrstca_pidm, aa.sfrstca_crn, TRUNC(aa.sfrstca_rsts_date)
+                                      ORDER BY aa.sfrstca_seq_number DESC) AS sfrstca_rn,
+               CASE WHEN MAX(aa.sfrstca_seq_number) OVER (PARTITION BY aa.sfrstca_term_code, aa.sfrstca_pidm, aa.sfrstca_crn
+                                                              ORDER BY TRUNC(aa.sfrstca_rsts_date)
+                                                               ROWS UNBOUNDED PRECEDING) = aa.sfrstca_seq_number
+                    THEN 'Y' ELSE 'N'
+                    END AS max_eff_seq
+          FROM sfrstca aa
+    INNER JOIN stvrsts bb
+            ON aa.sfrstca_rsts_code = bb.stvrsts_code
+    INNER JOIN sfrstcr cc
+            ON cc.sfrstcr_term_code = aa.sfrstca_term_code
+           AND cc.sfrstcr_pidm = aa.sfrstca_pidm
+           AND cc.sfrstcr_crn = aa.sfrstca_crn
+           AND aa.sfrstca_source_cde = 'BASE'
+)
+
+    SELECT a.sfrstca_term_code,
+           a.sfrstca_pidm,
+           a.sfrstca_crn,
+           a.stvrsts_incl_sect_enrl,
+           a.sfrstca_rsts_date AS record_begin_date,
+           COALESCE(
+              LAG(a.sfrstca_rsts_date) OVER (PARTITION BY a.sfrstca_term_code, a.sfrstca_pidm, a.sfrstca_crn
+                                                 ORDER BY a.sfrstca_rsts_date DESC),
+              b.stvterm_end_date) AS record_end_date
+      FROM sfrstca_audit a
+INNER JOIN stvterm b
+        ON a.sfrstca_term_code = b.stvterm_code
+INNER JOIN sfrrsts c
+        ON a.sfrstca_term_code = c.sfrrsts_term_code
+     WHERE a.sfrstca_rn = 1
+       AND a.max_eff_seq = 'Y'
+       AND (b.stvterm_code > '201530' AND b.stvterm_code != '99999')
+       AND c.sfrrsts_start_date <= SYSDATE -- Only load terms for which registration is open (or has occurred).

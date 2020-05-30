@@ -1,8 +1,7 @@
 WITH sfrstca_audit AS (
-            SELECT aa.sfrstca_term_code,
+        SELECT aa.sfrstca_term_code,
                aa.sfrstca_pidm,
                aa.sfrstca_crn,
-               aa.sfrstca_seq_number,
                bb.stvrsts_incl_sect_enrl,
                TRUNC(aa.sfrstca_rsts_date) AS sfrstca_rsts_date,
                ROW_NUMBER() OVER (PARTITION BY aa.sfrstca_term_code, aa.sfrstca_pidm, aa.sfrstca_crn, TRUNC(aa.sfrstca_rsts_date)
@@ -19,7 +18,7 @@ WITH sfrstca_audit AS (
             ON cc.sfrstcr_term_code = aa.sfrstca_term_code
            AND cc.sfrstcr_pidm = aa.sfrstca_pidm
            AND cc.sfrstcr_crn = aa.sfrstca_crn
-           AND aa.sfrstca_source_cde = 'BASE'
+         WHERE aa.sfrstca_source_cde = 'BASE'
 )
 
     SELECT a.sfrstca_term_code,
@@ -28,15 +27,19 @@ WITH sfrstca_audit AS (
            a.stvrsts_incl_sect_enrl,
            a.sfrstca_rsts_date AS record_begin_date,
            COALESCE(
-              LAG(a.sfrstca_rsts_date) OVER (PARTITION BY a.sfrstca_term_code, a.sfrstca_pidm, a.sfrstca_crn
-                                                 ORDER BY a.sfrstca_rsts_date DESC),
+              LAG(a.sfrstca_rsts_date) OVER
+                  (PARTITION BY a.sfrstca_term_code, a.sfrstca_pidm, a.sfrstca_crn
+                       ORDER BY a.sfrstca_rsts_date DESC),
               b.stvterm_end_date) AS record_end_date
       FROM sfrstca_audit a
 INNER JOIN stvterm b
         ON a.sfrstca_term_code = b.stvterm_code
 INNER JOIN sfrrsts c
-        ON a.sfrstca_term_code = c.sfrrsts_term_code
+        ON b.stvterm_code = c.sfrrsts_term_code
+       AND c.sfrrsts_ptrm_code = '1'
+       AND c.sfrrsts_rsts_code = 'RW'
+       AND c.sfrrsts_start_date <= SYSDATE -- Only load terms for which registration is open (or has occurred).
      WHERE a.sfrstca_rn = 1
        AND a.max_eff_seq = 'Y'
-       AND (b.stvterm_code > '201530' AND b.stvterm_code != '99999')
-       AND c.sfrrsts_start_date <= SYSDATE -- Only load terms for which registration is open (or has occurred).
+       AND b.stvterm_code > '201530'
+
